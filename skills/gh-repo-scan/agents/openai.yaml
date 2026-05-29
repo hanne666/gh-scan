@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub 仓库扫描"
+  short_description: "只读评估 GitHub 仓库、插件和工具的用途、技术栈、空间占用、风险与二开价值"
+  default_prompt: "扫描这个 GitHub 仓库或工具，先只读评估用途、技术栈、最小空间占用、适用场景、安装条件、风险、二开价值和下一步建议。"

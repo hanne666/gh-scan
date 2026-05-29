@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub 收藏整理"
+  short_description: "整理 GitHub stars，按中文 Lists 分类，识别待复核项目并生成 Markdown 清单"
+  default_prompt: "整理我的 GitHub stars，按既定中文分类归入 GitHub Lists，识别过时、重复、fork、低价值或用途不明项目，生成带分类、保留级别和清理建议的 Markdown 清单。"
