@@ -7,8 +7,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+SHARED = ROOT / "shared"
 SKILLS = ROOT / "skills"
 SKILL_NAMES = ["gh-repo-scan", "gh-stars-organizer"]
+SHARED_SYNC_PAIRS = [
+    (SHARED / "repo-scan-criteria.md", SKILLS / "gh-repo-scan" / "references" / "criteria.md"),
+    (SHARED / "repo-scan-criteria.md", SKILLS / "gh-stars-organizer" / "references" / "repo-scan-criteria.md"),
+    (SHARED / "categories.md", SKILLS / "gh-stars-organizer" / "references" / "categories.md"),
+    (SHARED / "freshness.md", SKILLS / "gh-stars-organizer" / "references" / "freshness.md"),
+]
 INSTALL_ROOTS = [
     Path.home() / ".claude" / "skills",
     Path.home() / ".codex" / "skills",
@@ -75,6 +82,13 @@ def dircmp_has_diff(left: Path, right: Path) -> bool:
 
 def collect_warnings() -> list[str]:
     warnings: list[str] = []
+
+    for shared, ref in SHARED_SYNC_PAIRS:
+        if shared.exists() and ref.exists():
+            if shared.read_text(encoding="utf-8") != ref.read_text(encoding="utf-8"):
+                warnings.append(f"shared/reference out of sync: {ref} differs from {shared}")
+        elif shared.exists() and not ref.exists():
+            warnings.append(f"reference copy missing: {ref} (source: {shared})")
 
     for scripts_dir in SKILLS.glob("*/scripts"):
         if scripts_dir.is_dir() and not any(scripts_dir.iterdir()):

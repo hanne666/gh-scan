@@ -399,4 +399,4 @@ python3 scripts/validate.py --strict
 
 ## 当前待确认事项
 
-- 是否清理本地生成的 `__pycache__/` 和 `*.pyc` 文件，待确认。
+- 无。`__pycache__/` 和 `*.pyc` 已通过 `.gitignore` 排除，不会被提交。

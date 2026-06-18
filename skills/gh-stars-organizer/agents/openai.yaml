@@ -1,3 +1,5 @@
+# Codex Agent 接口定义 — 由 Codex/Claude Code skill runner 读取
+# 字段含义：display_name（Agent 列表中的名称）、short_description（简短说明）、default_prompt（默认提示词）
 interface:
   display_name: "GitHub 收藏整理"
   short_description: "整理 GitHub stars，按中文 Lists 分类，识别待复核项目并生成 Markdown 清单"
