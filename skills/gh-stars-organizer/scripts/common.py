@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import re
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
-MANAGED_LISTS = [
+PRESET_LISTS = [
     "AI 编程与 Agent IDE",
     "Agent 框架与多 Agent",
     "MCP 与 Skills",
@@ -20,6 +22,25 @@ MANAGED_LISTS = [
     "待复核 Review Later",
 ]
 REVIEW_LATER = "待复核 Review Later"
+GH_SCAN_LIST_DESCRIPTION = "gh-scan 管理的 GitHub stars 分类"
+MAX_GITHUB_LISTS = 8
+GENERIC_TOPICS = {
+    "awesome", "app", "apps", "tool", "tools", "demo", "example", "examples",
+    "library", "framework", "template", "starter", "boilerplate", "plugin",
+    "plugins", "extension", "extensions", "open-source", "opensource",
+}
+TOPIC_DISPLAY_OVERRIDES = {
+    "ai": "AI",
+    "api": "API",
+    "cli": "CLI",
+    "llm": "LLM",
+    "mcp": "MCP",
+    "ocr": "OCR",
+    "pdf": "PDF",
+    "rag": "RAG",
+    "sdk": "SDK",
+    "ui": "UI",
+}
 
 CATEGORY_KEYWORDS = {
     "AI 编程与 Agent IDE": [
@@ -135,7 +156,87 @@ def repo_text(repo: dict[str, Any]) -> str:
     return " ".join(str(part).lower() for part in parts if part)
 
 
-def classify_category(repo: dict[str, Any]) -> tuple[str, int, list[str]]:
+def normalize_topic(value: object) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9.+#-]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text).strip("-")
+    if len(text) < 2 or text in GENERIC_TOPICS:
+        return ""
+    return text
+
+
+def display_topic(value: str) -> str:
+    if value in TOPIC_DISPLAY_OVERRIDES:
+        return TOPIC_DISPLAY_OVERRIDES[value]
+    parts = value.replace("-", " ").split()
+    return " ".join(TOPIC_DISPLAY_OVERRIDES.get(part, part) for part in parts)
+
+
+def topic_list(repo: dict[str, Any]) -> list[str]:
+    topics = repo.get("topics") or []
+    if not isinstance(topics, list):
+        return []
+    normalized = [normalize_topic(topic) for topic in topics]
+    return [topic for topic in normalized if topic]
+
+
+def infer_dynamic_taxonomy(
+    repos: list[dict[str, Any]],
+    *,
+    max_categories: int = MAX_GITHUB_LISTS,
+    min_category_size: int = 2,
+) -> dict[str, Any]:
+    topic_counts: Counter[str] = Counter()
+    language_counts: Counter[str] = Counter()
+    for repo in repos:
+        topic_counts.update(topic_list(repo))
+        language = str(repo.get("language") or "").strip()
+        if language:
+            language_counts[language] += 1
+
+    selected_topics = [
+        topic
+        for topic, count in topic_counts.most_common()
+        if count >= min_category_size
+    ][:max_categories]
+    if not selected_topics and topic_counts:
+        selected_topics = [topic for topic, _ in topic_counts.most_common(max_categories)]
+
+    selected_languages = [
+        language
+        for language, _ in language_counts.most_common()
+        if language
+    ][: max(0, max_categories - len(selected_topics))]
+
+    return {
+        "topic_rank": {topic: index for index, topic in enumerate(selected_topics)},
+        "language_rank": {language: index for index, language in enumerate(selected_languages)},
+    }
+
+
+def classify_dynamic_category(
+    repo: dict[str, Any],
+    taxonomy: dict[str, Any],
+) -> tuple[str, int, list[str]]:
+    topic_rank = taxonomy.get("topic_rank") or {}
+    language_rank = taxonomy.get("language_rank") or {}
+    ranked_topics = [
+        topic
+        for topic in topic_list(repo)
+        if topic in topic_rank
+    ]
+    if ranked_topics:
+        topic = sorted(ranked_topics, key=lambda item: topic_rank[item])[0]
+        return f"主题：{display_topic(topic)}", 2, [topic]
+
+    language = str(repo.get("language") or "").strip()
+    if language and language in language_rank:
+        return f"语言：{language}", 1, [language]
+
+    return REVIEW_LATER, 0, []
+
+
+def classify_preset_category(repo: dict[str, Any]) -> tuple[str, int, list[str]]:
     text = repo_text(repo)
     scores: list[tuple[int, int, str, list[str]]] = []
     for priority, (category, keywords) in enumerate(CATEGORY_KEYWORDS.items()):
@@ -147,6 +248,19 @@ def classify_category(repo: dict[str, Any]) -> tuple[str, int, list[str]]:
     scores.sort(reverse=True)
     score, _, category, matched = scores[0]
     return category, score, matched
+
+
+def classify_category(
+    repo: dict[str, Any],
+    *,
+    category_mode: str = "dynamic",
+    taxonomy: dict[str, Any] | None = None,
+) -> tuple[str, int, list[str]]:
+    if category_mode == "preset":
+        return classify_preset_category(repo)
+    if taxonomy is None:
+        taxonomy = infer_dynamic_taxonomy([repo])
+    return classify_dynamic_category(repo, taxonomy)
 
 
 def freshness_score(repo: dict[str, Any], *, now: datetime | None = None) -> tuple[int, str]:
@@ -207,7 +321,48 @@ def target_list_for(item: dict[str, Any]) -> str:
     if item.get("retention_level") in {"P2", "P3"}:
         return REVIEW_LATER
     category = item.get("category") or REVIEW_LATER
-    return category if category in MANAGED_LISTS else REVIEW_LATER
+    return category
+
+
+def category_order(items: list[dict[str, Any]]) -> list[str]:
+    counts = Counter(item.get("target_list") or item.get("category") or REVIEW_LATER for item in items)
+    categories = [
+        category
+        for category, _ in counts.most_common()
+        if category and category != REVIEW_LATER
+    ]
+    if counts.get(REVIEW_LATER):
+        categories.append(REVIEW_LATER)
+    return categories
+
+
+def enforce_list_limit(
+    items: list[dict[str, Any]],
+    *,
+    max_lists: int = MAX_GITHUB_LISTS,
+) -> list[dict[str, Any]]:
+    max_lists = max(2, max_lists)
+    counts = Counter(item.get("target_list") or REVIEW_LATER for item in items)
+    if len(counts) <= max_lists:
+        return items
+
+    non_review = [
+        (name, count)
+        for name, count in counts.items()
+        if name != REVIEW_LATER
+    ]
+    non_review.sort(key=lambda item: (-item[1], item[0]))
+    keep_count = max_lists - 1
+    kept = {name for name, _ in non_review[:keep_count]}
+
+    for item in items:
+        target = item.get("target_list") or REVIEW_LATER
+        if target == REVIEW_LATER or target in kept:
+            continue
+        item["original_target_list"] = target
+        item["target_list"] = REVIEW_LATER
+        item["list_limit_note"] = f"GitHub Lists 分类上限为 {max_lists} 类，低频分类并入待复核"
+    return items
 
 
 def short_intro(repo: dict[str, Any], *, max_chars: int = 150) -> str:

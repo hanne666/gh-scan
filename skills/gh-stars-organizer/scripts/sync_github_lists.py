@@ -7,7 +7,18 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from common import MANAGED_LISTS, extract_items, now_iso, read_json, target_list_for, write_json
+from common import (
+    GH_SCAN_LIST_DESCRIPTION,
+    MAX_GITHUB_LISTS,
+    REVIEW_LATER,
+    category_order,
+    enforce_list_limit,
+    extract_items,
+    now_iso,
+    read_json,
+    target_list_for,
+    write_json,
+)
 
 
 def gh_graphql(query: str, fields: list[tuple[str, str]] | None = None) -> dict[str, Any]:
@@ -106,10 +117,9 @@ def create_user_list(name: str, *, private: bool) -> dict[str, Any]:
       }
     }
     """
-    description = "gh-scan 管理的 GitHub stars 分类"
     data = gh_graphql(query, [
         ("name", name),
-        ("description", description),
+        ("description", GH_SCAN_LIST_DESCRIPTION),
         ("isPrivate", "true" if private else "false"),
     ])
     return data["data"]["createUserList"]["list"]
@@ -133,8 +143,8 @@ def build_plan(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     plan = []
     for item in items:
         target = item.get("target_list") or target_list_for(item)
-        if target not in MANAGED_LISTS:
-            target = "待复核 Review Later"
+        if not target:
+            target = REVIEW_LATER
         plan.append({
             "repo": item.get("full_name"),
             "url": item.get("html_url"),
@@ -146,18 +156,40 @@ def build_plan(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return plan
 
 
+def target_lists_from_plan(plan: list[dict[str, Any]]) -> list[str]:
+    counts: dict[str, int] = {}
+    for entry in plan:
+        target = entry.get("target_list") or REVIEW_LATER
+        counts[target] = counts.get(target, 0) + 1
+    names = [name for name, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
+    if REVIEW_LATER in names:
+        names = [name for name in names if name != REVIEW_LATER] + [REVIEW_LATER]
+    return names
+
+
+def is_gh_scan_managed_list(name: str, info: dict[str, Any], target_names: set[str]) -> bool:
+    if name in target_names:
+        return True
+    return (info.get("description") or "") == GH_SCAN_LIST_DESCRIPTION
+
+
 def apply_plan(plan: list[dict[str, Any]], *, private_lists: bool) -> tuple[int, int]:
     lists_by_name = fetch_user_lists()
     memberships = build_memberships(lists_by_name)
     created = 0
     updated = 0
+    target_names = set(target_lists_from_plan(plan))
 
-    for name in MANAGED_LISTS:
+    for name in target_lists_from_plan(plan):
         if name not in lists_by_name:
             lists_by_name[name] = create_user_list(name, private=private_lists)
             created += 1
 
-    managed_ids = {item["id"] for name, item in lists_by_name.items() if name in MANAGED_LISTS}
+    managed_ids = {
+        item["id"]
+        for name, item in lists_by_name.items()
+        if is_gh_scan_managed_list(name, item, target_names)
+    }
     for entry in plan:
         item_id = entry.get("node_id")
         if not item_id:
@@ -189,13 +221,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    items = extract_items(read_json(args.input))
+    payload = read_json(args.input)
+    items = extract_items(payload)
+    items = enforce_list_limit(items, max_lists=MAX_GITHUB_LISTS)
     plan = build_plan(items)
+    target_lists = category_order(items) or target_lists_from_plan(plan)
     plan_output = args.plan_output or args.input.with_name("lists_sync_plan.json")
     write_json(plan_output, {
         "generated_at": now_iso(),
         "mode": "apply" if args.apply else "dry-run",
+        "category_mode": payload.get("category_mode") if isinstance(payload, dict) else None,
+        "max_github_lists": MAX_GITHUB_LISTS,
         "count": len(plan),
+        "target_lists": target_lists,
         "items": plan,
     })
 

@@ -5,7 +5,7 @@ import argparse
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from common import MANAGED_LISTS, extract_items, read_json, short_intro
+from common import REVIEW_LATER, category_order, extract_items, read_json, short_intro
 
 
 def escape_cell(value: object) -> str:
@@ -25,7 +25,7 @@ def render_inventory(items: list[dict]) -> str:
     for item in items:
         by_category[item.get("target_list") or item.get("category")].append(item)
 
-    for category in MANAGED_LISTS:
+    for category in category_order(items):
         repos = sorted(
             by_category.get(category, []),
             key=lambda item: (item.get("retention_level", "P9"), -(item.get("stars") or 0)),
@@ -60,14 +60,14 @@ def render_summary(items: list[dict]) -> str:
         "# GitHub Lists 整理摘要",
         "",
         f"- 仓库数量：{len(items)}",
-        f"- 待复核数量：{categories.get('待复核 Review Later', 0)}",
+        f"- 待复核数量：{categories.get(REVIEW_LATER, 0)}",
         "",
         "## 分类统计",
         "",
         "| 分类 | 数量 |",
         "|---|---:|",
     ]
-    for category in MANAGED_LISTS:
+    for category in category_order(items):
         lines.append(f"| {category} | {categories.get(category, 0)} |")
     lines.extend([
         "",
