@@ -397,6 +397,3 @@ python3 scripts/sync_skills.py --apply
 python3 scripts/validate.py --strict
 ```
 
-## 当前待确认事项
-
-- 无。`__pycache__/` 和 `*.pyc` 已通过 `.gitignore` 排除，不会被提交。
