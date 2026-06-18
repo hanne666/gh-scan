@@ -1,11 +1,11 @@
 ---
 name: gh-stars-organizer
-description: 自动整理 GitHub starred repositories。用于用户要求整理 GitHub stars、GitHub 收藏仓库、星标仓库、自动分类 GitHub Lists、识别过时/重复/fork/低价值仓库、放入待复核 Review Later、生成 Markdown 清单，或希望把 GitHub stars 按中文分类长期维护。默认不取消 star，不删除 GitHub Lists，不覆盖非本 skill 管理的旧 Lists。
+description: 自动整理 GitHub starred repositories。用于用户要求整理 GitHub stars、GitHub 收藏仓库、星标仓库、根据收藏列表动态分类 GitHub Lists、识别过时/重复/fork/低价值仓库、放入待复核 Review Later、生成 Markdown 清单，或希望把 GitHub stars 按中文分类长期维护。默认不取消 star，不删除 GitHub Lists，不覆盖非本 skill 管理的旧 Lists。
 ---
 
 # GitHub Stars 整理
 
-批量整理 GitHub starred repositories，自动分类到 GitHub Lists，生成 Markdown 清单，并把过时、重复、fork、低 star 或用途不明项目放入 `待复核 Review Later`。
+批量整理 GitHub starred repositories，根据当前收藏列表里的仓库内容动态分类到 GitHub Lists，生成 Markdown 清单，并把过时、重复、fork、低 star 或用途不明项目放入 `待复核 Review Later`。
 
 除必要技术名词外，默认全部用中文输出。
 
@@ -24,7 +24,7 @@ description: 自动整理 GitHub starred repositories。用于用户要求整理
 默认可以自动执行：
 
 - 读取 GitHub stars
-- 自动分类
+- 根据 stars 内容动态分类
 - 创建缺失的 GitHub Lists
 - 更新仓库所属 Lists
 - 保留非本 skill 管理的旧 Lists
@@ -60,10 +60,16 @@ gh auth refresh -h github.com -s user
 
 这个 skill 已内置自动化脚本。默认优先使用脚本，不要临时重写 GitHub API 和分类逻辑。
 
-一键整理，默认只生成 GitHub Lists 同步计划，不写 GitHub：
+一键整理，默认动态分类，只生成 GitHub Lists 同步计划，不写 GitHub：
 
 ```bash
 python3 skills/gh-stars-organizer/scripts/organize_stars.py
+```
+
+如果用户明确希望使用内置固定分类：
+
+```bash
+python3 skills/gh-stars-organizer/scripts/organize_stars.py --category-mode preset
 ```
 
 分步执行：
@@ -81,20 +87,18 @@ python3 skills/gh-stars-organizer/scripts/sync_github_lists.py output/github-sta
 python3 skills/gh-stars-organizer/scripts/sync_github_lists.py output/github-stars/YYYY-MM-DD/stars_classified.json --apply
 ```
 
-## 默认分类
+## 分类策略
 
-使用 `categories.md` 的 10 个中文 Lists：
+默认使用 `dynamic` 模式：先读取当前账号 stars，再根据这批仓库的 topics 和语言生成分类。这样公开给不同用户使用时，分类会适配各自的收藏列表，而不是强制使用作者个人的固定分类。
 
-1. `AI 编程与 Agent IDE`
-2. `Agent 框架与多 Agent`
-3. `MCP 与 Skills`
-4. `RAG 与文档处理`
-5. `Prompt 与 LLM 工具`
-6. `自动化与爬虫`
-7. `UI 与应用模板`
-8. `开发基础设施与 CLI`
-9. `内容与媒体 AI`
-10. `待复核 Review Later`
+默认参数：
+
+- `--category-mode dynamic`
+- `--max-categories 8`
+- `--min-category-size 2`
+- 最终 GitHub Lists 分类总数最多 8 类；超过上限时，低频分类并入 `待复核 Review Later`
+
+如果用户明确需要个人固定分类，可以使用 `--category-mode preset`。固定分类清单见 `references/categories.md`。
 
 ## 更新时间评判
 
@@ -127,11 +131,13 @@ python3 skills/gh-stars-organizer/scripts/sync_github_lists.py output/github-sta
    - 保存仓库名、链接、stars、语言、topics、description、license、fork、archived、disabled、`pushed_at`、`updated_at`
 
 2. 读取现有 Lists：
-   - 识别本 skill 管理的 10 个 Lists
+   - 识别本次分类结果需要的 Lists
    - 保留用户已有其他 Lists
 
 3. 自动分类：
-   - 用仓库名、description、topics、语言和已知关键词判断分类
+   - 默认根据当前 stars 中的 topics 和语言生成动态分类
+   - `--category-mode preset` 时才使用内置固定关键词分类
+   - 最终 GitHub Lists 分类总数不得超过 8 类
    - 低置信度进入 `待复核 Review Later`
    - 需要深度判断时，使用 `gh-repo-scan` 的评估标准做轻量判断
 
@@ -140,7 +146,7 @@ python3 skills/gh-stars-organizer/scripts/sync_github_lists.py output/github-sta
    - 只给建议，不自动取消 star
 
 5. 同步 GitHub Lists：
-   - 创建缺失 Lists
+   - 创建本次分类结果需要但账号中缺失的 Lists，最多 8 类
    - 更新仓库 List 关系
    - 使用 `updateUserListsForItem` 前必须读取当前 List 关系
    - 保留非本 skill 管理的旧 Lists
